@@ -185,7 +185,9 @@ fn translate_pi_model(model: &PiAvailableModel, is_default: bool) -> p::Model {
         .as_deref()
         .or(model.id.as_deref())
         .unwrap_or("unknown");
-    let id = format!("{provider}/{model_id}");
+    // Pi providers may already return a provider-qualified model id. Keep the
+    // wire id canonical: adding the provider again breaks custom providers.
+    let id = qualify_model_id(provider, model_id);
     let base_display_name = model
         .display_name
         .clone()
@@ -395,6 +397,23 @@ fn standard_service_tiers() -> Vec<p::ModelServiceTier> {
     }]
 }
 
+fn qualify_model_id(provider: &str, model_id: &str) -> String {
+    let provider = provider.trim();
+    let model_id = model_id.trim();
+    if provider.is_empty() || provider == "pi" || model_id.is_empty() {
+        return model_id.to_string();
+    }
+    let prefix = format!("{provider}/");
+    if model_id
+        .get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(&prefix))
+    {
+        model_id.to_string()
+    } else {
+        format!("{prefix}{model_id}")
+    }
+}
+
 fn display_name_with_provider(provider: &str, display_name: &str) -> String {
     let display_name = display_name.trim();
     let display_name = if display_name.is_empty() {
@@ -494,6 +513,19 @@ mod tests {
             p::ReasoningEffort::Medium
         ));
         assert_eq!(m.input_modalities.len(), 2);
+    }
+
+    #[test]
+    fn translate_pi_model_does_not_duplicate_provider_qualified_id() {
+        let pi = PiAvailableModel {
+            provider: Some("unsloth".into()),
+            model_id: Some("unsloth/Qwen3.8-27B-GGUF:UD-Q6_K_L".into()),
+            display_name: Some("unsloth/Qwen3.8-27B-GGUF:UD-Q6_K_L".into()),
+            ..Default::default()
+        };
+        let model = translate_pi_model(&pi, false);
+        assert_eq!(model.id, "unsloth/Qwen3.8-27B-GGUF:UD-Q6_K_L");
+        assert_eq!(model.model, "unsloth/Qwen3.8-27B-GGUF:UD-Q6_K_L");
     }
 
     #[test]
